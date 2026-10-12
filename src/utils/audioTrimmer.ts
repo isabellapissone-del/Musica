@@ -91,11 +91,11 @@ function audioBufferTo16kMonoWav(buffer: AudioBuffer, targetSampleRate = 16000):
   return new Blob([arrayBuffer], { type: 'audio/wav' });
 }
 
-export async function trimAudioToMax3Minutes(
+export async function trimAudioToMax60Seconds(
   file: File,
   onProgress?: (msg: string) => void
 ): Promise<{ file: File; wasTrimmed: boolean }> {
-  const MAX_SECONDS = 180; // 3 minutes
+  const MAX_SECONDS = 60; // 60 segundos
 
   try {
     if (onProgress) onProgress('A otimizar ficheiro de áudio para processamento rápido...');

@@ -28,10 +28,11 @@ import { StyleCard } from './components/StyleCard';
 import { YouTubeSeoCard } from './components/YouTubeSeoCard';
 import { ProcessingState } from './components/ProcessingState';
 import { AudioFileInfo, YouTubeVideoInfo, SongAlternativeResult, ErrorDetails } from './types';
-import { trimAudioToMax3Minutes } from './utils/audioTrimmer';
+import { trimAudioToMax60Seconds } from './utils/audioTrimmer';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'file' | 'youtube'>('file');
+  const [intensity, setIntensity] = useState<'Leve' | 'Média' | 'Forte'>('Média');
   const [audioInfo, setAudioInfo] = useState<AudioFileInfo | null>(null);
   const [selectedYouTubeVideo, setSelectedYouTubeVideo] = useState<YouTubeVideoInfo | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -161,8 +162,8 @@ export default function App() {
       setStepMessage('A aceder ao vídeo do YouTube (segundos 20s a 80s)...');
       setStepDetail('A analisar 60 segundos com resolução leve e foco no áudio musical...');
     } else {
-      setStepMessage('A ouvir os primeiros 3 minutos do áudio...');
-      setStepDetail('A analisar tom, BPM, ritmo e presença vocal com modelo Gemini Flash...');
+      setStepMessage('A ouvir os primeiros 60 segundos do áudio...');
+      setStepDetail('A analisar tom, BPM, ritmo e presença vocal com modelo Gemini...');
     }
 
     try {
@@ -174,8 +175,13 @@ export default function App() {
         body: JSON.stringify(requestPayload),
       });
 
-      if (!response.ok && !response.body) {
-        throw new Error('Falha ao comunicar com o servidor.');
+      if (!response.ok) {
+        let errorData: any = null;
+        try {
+          errorData = await response.json();
+        } catch {}
+        const serverError = errorData?.error || errorData?.message || `Erro de ligação ao servidor (${response.status})`;
+        throw new Error(serverError);
       }
 
       // Leitura do fluxo SSE
@@ -311,7 +317,7 @@ export default function App() {
   };
 
   /**
-   * Chamada 1 via Ficheiro: Análise do áudio (máx. 3 minutos)
+   * Chamada 1 via Ficheiro: Análise do áudio (máx. 60 segundos)
    */
   const handleCreateAlternativeFromFile = async () => {
     if (!audioInfo) {
@@ -323,10 +329,10 @@ export default function App() {
     setErrorMessage(null);
     setProcessingStep('listening');
     setStepMessage('A otimizar áudio no navegador...');
-    setStepDetail('A converter para 16kHz mono (máx. 3 minutos) para envio rápido...');
+    setStepDetail('A converter para 16kHz mono (máx. 60 segundos) para envio ultrarrápido...');
 
     try {
-      const { file: processedFile } = await trimAudioToMax3Minutes(audioInfo.file, (detail) => {
+      const { file: processedFile } = await trimAudioToMax60Seconds(audioInfo.file, (detail) => {
         setStepDetail(detail);
       });
       const base64Data = await fileToBase64(processedFile);
@@ -341,6 +347,7 @@ export default function App() {
           audioBase64: base64Data,
           mimeType,
           fileName: audioInfo.name,
+          intensity,
         },
         {
           sourceType: 'file',
@@ -394,6 +401,7 @@ export default function App() {
           estilo: result.estilo,
           isInstrumental: result.isInstrumental,
           idiomaLetra: result.idiomaLetra,
+          intensity,
         }),
       });
 
@@ -671,7 +679,7 @@ export default function App() {
                     Ficheiro de áudio da música
                   </h3>
                   <p className="text-xs sm:text-sm text-zinc-400 pl-8">
-                    Carrega o ficheiro da canção em MP3 ou WAV (são analisados os primeiros 3 minutos).
+                    Carrega o ficheiro da canção em MP3 ou WAV (é analisado um trecho de 60 segundos).
                   </p>
                 </div>
 
@@ -700,6 +708,19 @@ export default function App() {
 
                 {/* Botão de ação: Criar versão alternativa */}
                 <div className="pt-2 flex flex-col items-center gap-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <label className="text-xs text-zinc-400">Intensidade:</label>
+                    <select
+                      value={intensity}
+                      onChange={(e) => setIntensity(e.target.value as 'Leve' | 'Média' | 'Forte')}
+                      disabled={isLoading || (quotaCountdown !== null && quotaCountdown > 0)}
+                      className="bg-zinc-800 text-zinc-200 text-xs rounded-lg px-2 py-1 border border-zinc-700 cursor-pointer"
+                    >
+                      <option value="Leve">Leve</option>
+                      <option value="Média">Média</option>
+                      <option value="Forte">Forte</option>
+                    </select>
+                  </div>
                   <button
                     type="button"
                     onClick={handleCreateAlternativeFromFile}
@@ -727,6 +748,7 @@ export default function App() {
                       </>
                     )}
                   </button>
+
 
                   {!audioInfo && (
                     <p className="text-xs text-zinc-400 flex items-center gap-1.5">
@@ -822,15 +844,30 @@ export default function App() {
               </div>
 
               {/* Botão "Gerar outra versão" que reutiliza a análise em memória sem re-enviar o áudio */}
-              <button
-                onClick={handleRegenerateLyrics}
-                disabled={isRegeneratingLyrics}
-                className="self-start sm:self-auto flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-zinc-900 hover:bg-zinc-800 text-purple-300 border border-purple-500/30 hover:border-purple-400/50 transition-all cursor-pointer disabled:opacity-50"
-                title="Gera uma nova letra com base na análise musical em memória (instantâneo)"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isRegeneratingLyrics ? 'animate-spin' : ''}`} />
-                <span>{isRegeneratingLyrics ? 'A gerar nova versão...' : 'Gerar outra versão'}</span>
-              </button>
+              <div className="flex flex-col sm:flex-row items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-zinc-400">Intensidade:</label>
+                  <select
+                    value={intensity}
+                    onChange={(e) => setIntensity(e.target.value as 'Leve' | 'Média' | 'Forte')}
+                    disabled={isRegeneratingLyrics}
+                    className="bg-zinc-800 text-zinc-200 text-xs rounded-lg px-2 py-1 border border-zinc-700 cursor-pointer"
+                  >
+                    <option value="Leve">Leve</option>
+                    <option value="Média">Média</option>
+                    <option value="Forte">Forte</option>
+                  </select>
+                </div>
+                <button
+                  onClick={handleRegenerateLyrics}
+                  disabled={isRegeneratingLyrics}
+                  className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-zinc-900 hover:bg-zinc-800 text-purple-300 border border-purple-500/30 hover:border-purple-400/50 transition-all cursor-pointer disabled:opacity-50"
+                  title="Gera uma nova letra com base na análise musical em memória (instantâneo)"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRegeneratingLyrics ? 'animate-spin' : ''}`} />
+                  <span>{isRegeneratingLyrics ? 'A gerar nova versão...' : 'Gerar outra versão'}</span>
+                </button>
+              </div>
             </div>
 
             {/* Idioma detetado & Correcção manual */}

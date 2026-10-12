@@ -304,7 +304,7 @@ app.post('/api/create-alternative', async (req, res) => {
 
     const targetDesc = youtubeUrl
       ? `vídeo do YouTube "${fileName || 'música'}" (segmento de 20s a 80s)`
-      : `ficheiro de áudio "${fileName || 'faixa'}" (primeiros 3 minutos)`;
+      : `ficheiro de áudio "${fileName || 'faixa'}" (trecho de 60 segundos)`;
 
     const systemInstruction = `És um produtor musical consagrado, engenheiro de som e letrista profissional de altíssima precisão métrica.
 A tua missão é analisar com a máxima atenção o ${targetDesc} e gerar uma versão alternativa em texto, de forma direta e rápida. Foca-te primordialmente na melodia, letra vocal, ritmo e instrumentação.
@@ -332,7 +332,7 @@ REGRAS OBRIGATÓRIAS:
 1. Identifica se é instrumental/batida ou se tem voz cantada.
 2. Gera a letra alternativa ([Verso], [Refrão], [Ponte]) ou "Instrumental: sem letra" (< 4000 caracteres).
 3. Descreve o estilo sonoro original com etiquetas em Português de Portugal (< 900 caracteres).`
-      : `Analisa os primeiros 3 minutos do áudio (${fileName || 'faixa'}).
+      : `Analisa o trecho de 60 segundos do áudio (${fileName || 'faixa'}).
 1. Identifica se é instrumental/batida ou se tem voz cantada.
 2. Gera a letra alternativa ([Verso], [Refrão], [Ponte]) ou "Instrumental: sem letra" (< 4000 caracteres).
 3. Descreve o estilo sonoro original com etiquetas em Português de Portugal (< 900 caracteres).`;
@@ -734,7 +734,8 @@ ${JSON.stringify(currentEstilo)}`,
  */
 app.post('/api/regenerate-lyrics', async (req, res) => {
   try {
-    const { analysisId, estilo, isInstrumental, idiomaLetra } = req.body;
+    const { analysisId, estilo, isInstrumental, idiomaLetra, intensity } = req.body;
+    const selectedIntensity = intensity || 'Média';
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -766,17 +767,27 @@ app.post('/api/regenerate-lyrics', async (req, res) => {
 
     const isEnglish = finalIdioma.toLowerCase().includes('ingl');
 
+    const intensityRules = {
+      'Leve': '- Letra: mesma narrativa e imagens principais, usando sinónimos e outra ordem de frases.\n- Estilo: mesma descrição com pequenas variações.\n- Tags: ~25% novas.',
+      'Média': '- Letra: mesmo tema e emoção, usando imagens e metáforas diferentes.\n- Estilo: reescrito com outros detalhes de produção.\n- Tags: ~50% novas.',
+      'Forte': '- Letra: mesmo tema/emoção, mas com outro ponto de vista e cenas totalmente novas. Nenhuma imagem repetida.\n- Estilo: descrito de um ângulo completamente diferente (ex: foco na textura/mistura), mantendo o mesmo som.\n- Tags: ~75% novas.'
+    };
+
     const prompt = `Gera uma NOVA variação de letra alternativa completa baseada neste perfil musical já analisado:
 Idioma: ${finalIdioma} (${isEnglish ? 'Inglês internacional neutro' : 'Português de Portugal europeu'}).
-Perfil sonoro da música:
+Nível de intensidade da variação: ${selectedIntensity}.
+Regras de intensidade para esta variação:
+${intensityRules[selectedIntensity as keyof typeof intensityRules]}
+
+Perfil sonoro da música (NÚCLEO FIXO - NUNCA MUDAR):
 ${typeof finalEstilo === 'string' ? finalEstilo : JSON.stringify(finalEstilo, null, 2)}
 
 REGRAS:
-- Escreve uma letra 100% inédita com nova poesia e imagens, mantendo as secções [Verso], [Refrão], [Verso 2], [Refrão], [Ponte].
+- Escreve uma letra nova seguindo as regras de intensidade acima, mantendo as secções [Verso], [Refrão], [Verso 2], [Refrão], [Ponte].
 - Mesma cadência e esquema de rimas para caber na mesma melodia.
 - MÁXIMO ABSOLUTO DE 4500 CARACTERES.
 
-Devolve estritamente um JSON com o campo "letra".`;
+Devolve estritamente um JSON com o campo "letra" e o campo "estilo" (atualizado segundo a intensidade).`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.5-flash-lite',
@@ -788,16 +799,19 @@ Devolve estritamente um JSON com o campo "letra".`;
           type: Type.OBJECT,
           properties: {
             letra: { type: Type.STRING },
+            estilo: { type: Type.OBJECT, properties: { descricao: { type: Type.STRING }, tags: { type: Type.ARRAY, items: { type: Type.STRING } } } },
           },
-          required: ['letra'],
+          required: ['letra', 'estilo'],
         },
       },
     });
 
     let newLetra = '';
+    let newEstilo: any = null;
     try {
       const parsed = JSON.parse(response.text || '{}');
       newLetra = parsed.letra || '';
+      newEstilo = parsed.estilo || null;
     } catch {
       newLetra = response.text || '';
     }
@@ -826,13 +840,15 @@ Devolve estritamente um JSON com o campo "letra".`;
       }
     }
 
-    // Update cache with the new lyrics
+    // Update cache with the new lyrics and style
     if (analysisId && cached) {
       cached.letra = newLetra;
+      if (newEstilo) cached.estilo = newEstilo;
     }
 
     return res.json({
       letra: newLetra,
+      estilo: newEstilo || finalEstilo,
       idiomaLetra: finalIdioma,
       analysisId,
     });
