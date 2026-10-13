@@ -9,6 +9,8 @@ import {
   Sparkles,
   Wand2,
   RefreshCw,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface LyricsCardProps {

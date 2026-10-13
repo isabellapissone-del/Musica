@@ -39,15 +39,14 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000);
 
-// Helper to calculate style text length for limit verification
+// Helper to calculate style text length for limit verification and unified export
 function formatStyleForCount(style: any): string {
   if (!style) return '';
-  if (typeof style === 'string') return style.trim();
-  const parts: string[] = [];
-  if (style.descricao) parts.push(style.descricao.trim());
-  if (style.tags && Array.isArray(style.tags) && style.tags.length > 0) {
-    parts.push(`Etiquetas: ${style.tags.join(', ')}`);
-  }
+  if (typeof style === 'string') return style.trim().slice(0, 950);
+
+  const tagsList = Array.isArray(style.tags) ? style.tags.filter(Boolean) : [];
+  const section1 = `ETIQUETAS DE RECRIAÇÃO DE SOM\n${tagsList.length > 0 ? tagsList.join(', ') : 'N/A'}`;
+
   const details: string[] = [];
   details.push(`duração alvo: mínimo 5:00`);
   if (style.bpm) details.push(`BPM: ${style.bpm}`);
@@ -65,10 +64,25 @@ function formatStyleForCount(style: any): string {
   if (style.instrumentos && Array.isArray(style.instrumentos) && style.instrumentos.length > 0) {
     details.push(`Instrumentos: ${style.instrumentos.join(', ')}`);
   }
-  if (details.length > 0) {
-    parts.push(`Parâmetros: ${details.join(' · ')}`);
+  const section2 = `PARÂMETROS DE FIDELIDADE ACÚSTICA\n${details.join(' · ')}`;
+
+  const descStr = (style.descricao || '').trim();
+  const section3Header = `DESCRIÇÃO FIEL DO SOM ORIGINAL`;
+
+  let fullText = `${section1}\n\n${section2}\n\n${section3Header}\n${descStr || 'N/A'}`.trim();
+
+  if (fullText.length > 950) {
+    const prefix = `${section1}\n\n${section2}\n\n${section3Header}\n`;
+    const availableForDesc = 950 - prefix.length - 3;
+    if (availableForDesc > 40) {
+      const trimmed = descStr.slice(0, availableForDesc).trim() + '...';
+      fullText = `${prefix}${trimmed}`.trim();
+    } else {
+      fullText = fullText.slice(0, 950).trim();
+    }
   }
-  return parts.join('\n\n').trim();
+
+  return fullText;
 }
 
 /**
@@ -351,7 +365,8 @@ REGRAS OBRIGATÓRIAS:
    - Se a original violar estas regras, reescreve de forma segura, mantendo a emoção/tema. Usa linguagem suave para monetização.
    - Verifica o resultado e devolve no campo "conformidade" um JSON com "estado" ("ok" ou "atenção") e "avisos" (lista curta de partes sensíveis, se houver).
 5. ESTILO MUSICAL (LIMITE ESTRITO):
-   - O estilo sonoro com todos os campos sumariados DEVE ter menos de 950 caracteres no total.`;
+   - O estilo sonoro reúne 3 componentes: ETIQUETAS DE RECRIAÇÃO DE SOM, PARÂMETROS DE FIDELIDADE ACÚSTICA e DESCRIÇÃO FIEL DO SOM ORIGINAL.
+   - O somatório de todos estes campos DEVE ter rigorosamente MENOS DE 950 caracteres no total.`;
 
     const userPrompt = youtubeUrl
       ? `Analisa os 60 segundos deste vídeo do YouTube (de 20s a 80s: ${fileName || 'faixa'}). Foca-te estritamente no áudio, ritmo, melodia, letra e instrumentação musical.
@@ -746,12 +761,14 @@ ${JSON.stringify(currentEstilo)}`,
         console.warn('Erro ao encurtar estilo via modelo, aplicando condensação direta:', err);
       }
 
-      // Safeguard slice
+      // Safeguard slice estrito para <= 950 caracteres
       if (formatStyleForCount(currentEstilo).length > MAX_ESTILO_CHARS) {
         if (typeof currentEstilo === 'object' && currentEstilo.descricao) {
-          currentEstilo.descricao = currentEstilo.descricao.slice(0, 450).trim() + '...';
+          const excess = formatStyleForCount(currentEstilo).length - MAX_ESTILO_CHARS;
+          const newDescLen = Math.max(30, currentEstilo.descricao.length - excess - 4);
+          currentEstilo.descricao = currentEstilo.descricao.slice(0, newDescLen).trim() + '...';
         }
-        if (Array.isArray(currentEstilo.tags) && currentEstilo.tags.length > 5) {
+        if (Array.isArray(currentEstilo.tags) && currentEstilo.tags.length > 5 && formatStyleForCount(currentEstilo).length > MAX_ESTILO_CHARS) {
           currentEstilo.tags = currentEstilo.tags.slice(0, 5);
         }
       }
