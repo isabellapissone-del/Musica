@@ -18,6 +18,10 @@ interface LyricsCardProps {
   onGenerateLyricsForBeat?: (idioma: 'pt' | 'en') => Promise<void>;
   isGeneratingLyricsForBeat?: boolean;
   letraCriada?: boolean;
+  conformidade?: {
+    estado: 'ok' | 'atenção';
+    avisos: string[];
+  };
 }
 
 export const LyricsCard: React.FC<LyricsCardProps> = ({
@@ -122,6 +126,14 @@ export const LyricsCard: React.FC<LyricsCardProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Badge de Conformidade YouTube */}
+          {conformidade && (
+            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${conformidade.estado === 'ok' ? 'bg-emerald-950/50 text-emerald-300 border-emerald-500/30' : 'bg-amber-950/50 text-amber-300 border-amber-500/30'}`}>
+              {conformidade.estado === 'ok' ? <CheckCircle2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+              <span>{conformidade.estado === 'ok' ? 'Verificado para o YouTube' : 'Rever antes de publicar'}</span>
+            </div>
+          )}
+          
           {/* Character counter (e.g. "812 / 4500"), turns red if over limit */}
           <span
             className={`text-xs font-mono font-medium px-2.5 py-1.5 rounded-lg border transition-colors ${
@@ -162,7 +174,16 @@ export const LyricsCard: React.FC<LyricsCardProps> = ({
 
       {/* Guide & Language Note for Vocal Songs */}
       {!isInstrumentalState && (
-        <div className="mb-3 space-y-1.5">
+        <div className="mb-3 space-y-2">
+          {conformidade && conformidade.estado === 'atenção' && (
+             <details className="p-3 bg-amber-950/30 border border-amber-500/20 rounded-xl text-[11px] text-amber-300">
+               <summary className="font-semibold cursor-pointer">Rever avisos de conformidade ({conformidade.avisos.length})</summary>
+               <ul className="list-disc list-inside mt-2 space-y-1">
+                 {conformidade.avisos.map((aviso, i) => <li key={i}>{aviso}</li>)}
+               </ul>
+             </details>
+          )}
+
           {idiomaLetra && (
             <div className="sm:hidden flex items-center gap-1.5 text-xs text-purple-300 bg-purple-950/40 border border-purple-500/30 px-2.5 py-1 rounded-md">
               <Languages className="w-3.5 h-3.5 text-purple-400" />

@@ -46,6 +46,10 @@ export interface SongAlternativeResult {
   isInstrumental?: boolean;
   letraCriada?: boolean;
   youtubeSeo?: YouTubeSeoPackage;
+  conformidade?: {
+    estado: 'ok' | 'atenção';
+    avisos: string[];
+  };
   sourceType?: 'file' | 'youtube';
   sourceTitle?: string;
   sourceThumbnail?: string;

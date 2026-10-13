@@ -49,6 +49,7 @@ function formatStyleForCount(style: any): string {
     parts.push(`Etiquetas: ${style.tags.join(', ')}`);
   }
   const details: string[] = [];
+  details.push(`duração alvo: mínimo 5:00`);
   if (style.bpm) details.push(`BPM: ${style.bpm}`);
   if (style.compasso) details.push(`Compasso: ${style.compasso}`);
   if (style.tom) details.push(`Tom: ${style.tom}`);
@@ -69,6 +70,27 @@ function formatStyleForCount(style: any): string {
   }
   return parts.join('\n\n').trim();
 }
+
+/**
+ * Calcula a duração e o número de compassos com base na estrutura da letra
+ */
+function calculateDuration(letra: string, bpm: string): { durationSeconds: number, totalBars: number } {
+  let totalBars = 0;
+  const bpmNum = parseInt(bpm) || 120;
+  
+  // Regex to find [Secção - X compassos]
+  const regex = /\[.*? - (\d+)\s*compassos\]/g;
+  let match;
+  while ((match = regex.exec(letra)) !== null) {
+    totalBars += parseInt(match[1]) || 0;
+  }
+  
+  // durationSeconds = totalBars * beatsPerBar * 60 / BPM (assuming 4/4)
+  const durationSeconds = (totalBars * 4 * 60) / bpmNum;
+  
+  return { durationSeconds, totalBars };
+}
+
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -324,8 +346,12 @@ REGRAS OBRIGATÓRIAS:
    - Escreve uma letra nova que siga de muito perto a original em tema, emoção, narrativa, número de versos por secção ([Verso], [Refrão], [Verso 2], [Refrão], [Ponte]), métrica e esquema de rimas.
    - NUNCA copies frases da letra original. Palavras e imagens 100% novas.
    - LIMITE OBRIGATÓRIO: A letra DEVE ter menos de 4500 caracteres no total.
-3. ESTILO MUSICAL (LIMITE ESTRITO):
-   - O estilo sonoro com todos os campos sumariados DEVE ter menos de 950 caracteres no total. Sê conciso, direto e cirúrgico em cada parâmetro.`;
+4. CONFORMIDADE COM YOUTUBE (ESTRITO):
+   - NUNCA inclui: discurso de ódio, assédio, violência explícita, atos perigosos, automutilação, conteúdo sexual explícito, desinformação perigosa, spam ou dados pessoais.
+   - Se a original violar estas regras, reescreve de forma segura, mantendo a emoção/tema. Usa linguagem suave para monetização.
+   - Verifica o resultado e devolve no campo "conformidade" um JSON com "estado" ("ok" ou "atenção") e "avisos" (lista curta de partes sensíveis, se houver).
+5. ESTILO MUSICAL (LIMITE ESTRITO):
+   - O estilo sonoro com todos os campos sumariados DEVE ter menos de 950 caracteres no total.`;
 
     const userPrompt = youtubeUrl
       ? `Analisa os 60 segundos deste vídeo do YouTube (de 20s a 80s: ${fileName || 'faixa'}). Foca-te estritamente no áudio, ritmo, melodia, letra e instrumentação musical.
@@ -376,8 +402,16 @@ REGRAS OBRIGATÓRIAS:
             },
             required: ['descricao', 'tags'],
           },
+          conformidade: {
+            type: Type.OBJECT,
+            properties: {
+              estado: { type: Type.STRING, enum: ['ok', 'atenção'] },
+              avisos: { type: Type.ARRAY, items: { type: Type.STRING } },
+            },
+            required: ['estado', 'avisos'],
+          },
         },
-        required: ['isInstrumental', 'letra', 'estilo'],
+        required: ['isInstrumental', 'letra', 'estilo', 'conformidade'],
       },
     };
 
@@ -566,7 +600,58 @@ REGRAS OBRIGATÓRIAS:
     // Contagem no código dos limites:
     const MAX_LETRA_CHARS = 4500;
     const MAX_ESTILO_CHARS = 950;
+    
+    // Verificar duração mínima de 5 minutos (300 segundos)
+    const bpm = currentEstilo?.bpm || '120';
+    let { durationSeconds, totalBars } = calculateDuration(currentLetra, bpm);
+    
+    // Se a duração for menor que 300 segundos, pedir ao modelo para alongar
+    if (durationSeconds < 300 && !isInstrumental) {
+        sendEvent({
+          step: 'extending',
+          message: 'A alongar música para 5 minutos...',
+          detail: `Duração atual: ${Math.floor(durationSeconds/60)}:${Math.floor(durationSeconds%60).toString().padStart(2, '0')}. A adicionar secções.`,
+        });
 
+        const extendRes = await ai.models.generateContent({
+          model: 'gemini-3.5-flash-lite',
+          contents: `A seguinte letra tem ${Math.floor(durationSeconds/60)}:${Math.floor(durationSeconds%60).toString().padStart(2, '0')} e é curta demais. O objetivo é atingir no mínimo 5 minutos (300 segundos).
+          Adiciona secções (Breakdown instrumental, segunda Ponte, repetições de Refrão) para alongar a música sem mudar o estilo ou a narrativa. Usa [Nome da secção - X compassos].
+          
+          Letra atual:
+          ${currentLetra}`,
+          config: {
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                letra: { type: Type.STRING },
+              },
+              required: ['letra'],
+            },
+          },
+        });
+
+        if (extendRes.text) {
+          try {
+            const extendedParsed = JSON.parse(extendRes.text);
+            currentLetra = extendedParsed.letra;
+            // Recalcular após alongar
+            const recalculated = calculateDuration(currentLetra, bpm);
+            durationSeconds = recalculated.durationSeconds;
+            totalBars = recalculated.totalBars;
+          } catch(e) {
+            console.error('Erro ao alongar letra:', e);
+          }
+        }
+    }
+    
+    // Adicionar duração estimada à letra
+    if (!isInstrumental) {
+        currentLetra += `\n\nDuração estimada: ${Math.floor(durationSeconds/60)}:${Math.floor(durationSeconds%60).toString().padStart(2, '0')} (${totalBars} compassos a ${bpm} BPM)`;
+    }
+    
     let styleText = formatStyleForCount(currentEstilo);
 
     // Se a letra passar do limite (4500 caracteres), faz chamada dedicada super rápida só para encurtar
@@ -694,6 +779,7 @@ ${JSON.stringify(currentEstilo)}`,
         idiomaLetra,
         letra: currentLetra,
         estilo: currentEstilo,
+        conformidade: parsedResult.conformidade,
       },
     });
 
