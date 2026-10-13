@@ -31,6 +31,7 @@ export const LyricsCard: React.FC<LyricsCardProps> = ({
   onGenerateLyricsForBeat,
   isGeneratingLyricsForBeat = false,
   letraCriada = false,
+  conformidade,
 }) => {
   const [copied, setCopied] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<'pt' | 'en'>('pt');
